@@ -11,8 +11,6 @@ from rdkit import Chem
 
 from . import XTB_LOCATION
 
-print(XTB_LOCATION)
-
 
 class RunXTB:
     """Runs xTB-GFN2 on a mol and parses the output.
@@ -188,6 +186,8 @@ class XTBP:
             "metadata": {"success": False},
             "atomprop": {},
             "bondprop": {},
+            "charge": 0,  # Default charge (neutral)
+            "multiplicity": 1.0,  # Default multiplicity (singlet)
         }
         self.parse_xtb(self.output)
 
@@ -274,10 +274,21 @@ class XTBP:
         if "number of atoms" in line.strip():
             self.attributes["natom"] = int(line.split()[4])
 
-        # Grab total charge
+        # Grab total charge (old format: "charge    :   0", new format: ":  net charge    0")
         if "charge" == line.strip()[:6]:
             charge = int(line.split()[2])
             self.attributes["charge"] = charge
+        elif "net charge" in line and "charge" not in self.attributes:
+            # xTB 6.7+ format: ":  net charge                          0          :"
+            parts = line.split()
+            for i, part in enumerate(parts):
+                if part == "charge" and i + 1 < len(parts):
+                    try:
+                        charge = int(parts[i + 1])
+                        self.attributes["charge"] = charge
+                        break
+                    except ValueError:
+                        pass
 
         # Multiplicity = Spin + 1
         if "spin" == line.strip()[:4]:
@@ -386,9 +397,19 @@ class XTBP:
                 while "END" != line.strip()[-3:]:
                     # Atoms block start with 3 blank spaces, bonds block starts with 1
                     if line[:3] == "   ":
-                        x, y, z, atom = line.split()[:4]
-                        atomnos.append(Chem.GetPeriodicTable().GetAtomicNumber(atom))
-                        atomcoords.append([float(x), float(y), float(z)])
+                        parts = line.split()
+                        # Verify this is a coordinate line (4+ parts, 4th is element symbol)
+                        if len(parts) >= 4:
+                            try:
+                                x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
+                                atom = parts[3]
+                                # Check if atom is a valid element symbol (1-2 chars, first uppercase)
+                                if len(atom) <= 2 and atom[0].isupper():
+                                    atomnos.append(Chem.GetPeriodicTable().GetAtomicNumber(atom))
+                                    atomcoords.append([x, y, z])
+                            except (ValueError, IndexError):
+                                # Not a coordinate line, skip
+                                pass
                     line = next(inputfile)
                 self.attributes["natom"] = len(atomnos)
                 self.attributes["atomnos"] = atomnos
@@ -646,22 +667,35 @@ class XTBP:
             atom_fp = []
             atom_fn = []
             atom_fz = []
-            for i in range(self.attributes["natom"]):
+            # Parse Fukui indices until we hit a non-data line
+            # Data lines have format: "     1C      -0.054    0.019   -0.017"
+            while True:
+                # Check if line looks like Fukui data (starts with spaces and has atom index)
+                stripped = line.strip()
+                if not stripped or stripped.startswith('-'):
+                    # Empty line or separator line, done
+                    break
                 try:
-                    atom_fp.append(float(line[9:19]))
-                except:
-                    atom_fp.append(-1000000.0)
+                    # Try to parse as Fukui data
+                    fp = float(line[9:19])
+                    fn = float(line[19:28])
+                    fz = float(line[28:])
+                    atom_fp.append(fp)
+                    atom_fn.append(fn)
+                    atom_fz.append(fz)
+                except (ValueError, IndexError):
+                    # Not a valid Fukui line, done
+                    break
                 try:
-                    atom_fn.append(float(line[19:28]))
-                except:
-                    atom_fn.append(-1000000.0)
-                try:
-                    atom_fz.append(float(line[28:]))
-                except:
-                    atom_fz.append(1000000.0)
-                line = next(inputfile)
+                    line = next(inputfile)
+                except StopIteration:
+                    break
 
-            self.attributes["atomprop"]["fukui"] = [atom_fp, atom_fn, atom_fz]
+            if atom_fp:  # Only set if we got data
+                self.attributes["atomprop"]["fukui"] = [atom_fp, atom_fn, atom_fz]
+                # Also set natom from number of Fukui entries if not already set
+                if "natom" not in self.attributes:
+                    self.attributes["natom"] = len(atom_fp)
 
         # Get LMO data
         #

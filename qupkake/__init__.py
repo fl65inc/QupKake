@@ -7,24 +7,34 @@ from .qupkake import *
 __version__ = get_versions()["version"]
 
 import os
+import shutil
 import subprocess
 
-try:
-    check_package = subprocess.run(["conda", "list", "xtb"], stdout=subprocess.PIPE)
-    check_package_decoded = check_package.stdout.decode("utf-8").split()
-    assert "xtb" in check_package_decoded
-    assert "6.4.1" in check_package_decoded
+# Priority for xTB location:
+# 1. XTBPATH environment variable (explicit user setting)
+# 2. System xTB found in PATH
+# 3. Bundled xTB (may not work on all architectures)
+XTB_LOCATION = None
 
-    XTB_LOCATION = os.environ.get("XTBPATH") or "xtb"
-except AssertionError:
-    XTB_LOCATION = os.environ.get("XTBPATH") or os.path.join(
-        os.path.dirname(__file__), "xtb-641/bin/xtb"
-    )
-finally:
-    if XTB_LOCATION != "xtb":
-        if not os.path.exists(XTB_LOCATION):
-            raise RuntimeError(f'xTB exectuable in: "{XTB_LOCATION}" does not exists.')
+# First check XTBPATH environment variable
+if os.environ.get("XTBPATH"):
+    XTB_LOCATION = os.environ.get("XTBPATH")
+    if not os.path.exists(XTB_LOCATION):
+        raise RuntimeError(f'xTB executable in XTBPATH: "{XTB_LOCATION}" does not exist.')
+else:
+    # Try to find xTB in system PATH
+    system_xtb = shutil.which("xtb")
+    if system_xtb:
+        XTB_LOCATION = system_xtb
     else:
-        raise RuntimeError(
-            'Conda version of xTB is currently not supported.\nPlease compile it from source and export the path manually to "XTBPATH" environment variable.'
-        )
+        # Fall back to bundled xTB
+        bundled_xtb = os.path.join(os.path.dirname(__file__), "xtb-641/bin/xtb")
+        if os.path.exists(bundled_xtb):
+            XTB_LOCATION = bundled_xtb
+        else:
+            raise RuntimeError(
+                'xTB not found. Please install xTB and either:\n'
+                '  1. Add it to your PATH, or\n'
+                '  2. Set the XTBPATH environment variable to the xTB executable path.\n'
+                'Install with: conda install -c conda-forge xtb'
+            )

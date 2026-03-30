@@ -272,11 +272,17 @@ def run_prediction_pipeline(
         )
         df["pka"] = pka_predictions
 
+        # Ensure output directory exists
+        output_dir = f"{root}/output"
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Use name_col if it exists, otherwise use default
+        id_name = name_col if name_col in df.columns else None
         PandasTools.WriteSDF(
             df,
             f"{root}/output/{output}",
             molColName="ROMol",
-            idName=name_col,
+            idName=id_name,
             properties=["idx", "pka_type", "pka"],
         )
         os.remove(f"{root}/raw/{output}")

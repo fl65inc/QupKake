@@ -230,7 +230,7 @@ class MolDatasetAbstract(Dataset, ABC):
     def _load_processed_data(self, file_name):
         """Load processed data from file"""
         file_path = os.path.join(self.processed_dir, file_name)
-        return torch.load(file_path)
+        return torch.load(file_path, weights_only=False)
 
     @abstractmethod
     def _process_chunk(self, chunk):
@@ -506,7 +506,8 @@ class MolPairDataset(MolDatasetAbstract):
         atom_idx = self.data.loc[idx, self.idx_col]
         conjugate = self.data.loc[idx, self.type_col]
         data = torch.load(
-            os.path.join(self.processed_dir, f"{name}_{atom_idx}_{conjugate}_pair.pt")
+            os.path.join(self.processed_dir, f"{name}_{atom_idx}_{conjugate}_pair.pt"),
+            weights_only=False
         )
         return data
 
